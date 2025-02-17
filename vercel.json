@@ -1,9 +1,3 @@
 {
-  "version": 2,
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "src/serverless.js"
-    }
-  ]
+  "version": 2
 }
