@@ -2,6 +2,18 @@ import express from 'express';
 import pkg from 'pg';
 import dotenv from 'dotenv';
 import usersRouter from './routes/users.js';
+import mentorsRouter from './routes/mentors.js';
+import menteesRouter from './routes/mentees.js';
+import qualificationsRouter from './routes/qualifications.js';
+import mentorQualificationsRouter from './routes/mentorQualifications.js';
+import expertisesRouter from './routes/expertises.js';
+import mentorExpertisesRouter from './routes/mentorExpertises.js';
+import jobRolesRouter from './routes/jobRoles.js';
+import sessionsRouter from './routes/sessions.js';
+import sessionMentorsRouter from './routes/sessionMentors.js';
+import paymentsRouter from './routes/payments.js';
+import resumesRouter from './routes/resumes.js';
+import industriesRouter from './routes/industries.js';
 
 dotenv.config();
 
@@ -28,5 +40,17 @@ app.get('/', (req, res) => {
 });
 
 app.use('/users', usersRouter);
+app.use('/mentors', mentorsRouter);
+app.use('/mentees', menteesRouter);
+app.use('/qualifications', qualificationsRouter);
+app.use('/mentors', mentorQualificationsRouter);
+app.use('/expertises', expertisesRouter);
+app.use('/mentors', mentorExpertisesRouter);
+app.use('/job-roles', jobRolesRouter);
+app.use('/sessions', sessionsRouter);
+app.use('/sessions', sessionMentorsRouter);
+app.use('/payments', paymentsRouter);
+app.use('/resumes', resumesRouter);
+app.use('/industries', industriesRouter);
 
 export default app;
