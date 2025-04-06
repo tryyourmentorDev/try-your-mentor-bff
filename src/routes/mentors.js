@@ -5,6 +5,73 @@ import { pool } from '../lib/db.js'; // your DB connection pool
 
 const router = Router();
 
+
+/**
+ * POST /mentors/signup
+ * Creates a new mentor profile by inserting a record in the users table
+ * and then inserting a corresponding record in the mentors table.
+ * Expects JSON body with:
+ *   email, full_name, bio, rating, status, mentor_type, level_of_service, charge
+ * Note: password_hash is not provided from the client. We store a dummy value.
+ */
+router.post('/signup', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const {
+      email,
+      full_name,
+      bio,
+      rating,
+      status,
+      mentor_type,
+      level_of_service,
+      charge,
+    } = req.body;
+
+    // Use a dummy password hash since it's not provided
+    const dummyPassword = 'dummy';
+
+    // Insert into the users table with role 'mentor'
+    const insertUserQuery = `
+      INSERT INTO users (email, password_hash, full_name, role, created_at)
+      VALUES ($1, $2, $3, 'mentor', NOW())
+      RETURNING id
+    `;
+    const userResult = await client.query(insertUserQuery, [
+      email,
+      dummyPassword,
+      full_name,
+    ]);
+    const userId = userResult.rows[0].id;
+
+    // Insert into the mentors table using the new user's id
+    const insertMentorQuery = `
+      INSERT INTO mentors (user_id, bio, rating, status, mentor_type, level_of_service, charge, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+      RETURNING user_id
+    `;
+    await client.query(insertMentorQuery, [
+      userId,
+      bio,
+      rating,
+      status,
+      mentor_type,
+      level_of_service,
+      charge,
+    ]);
+
+    await client.query('COMMIT');
+    return res.status(201).json({ mentorUserId: userId });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating mentor:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    client.release();
+  }
+});
+
 /**
  * POST /mentors
  * Creates a new mentor profile or "elevates" an existing user to a mentor.
