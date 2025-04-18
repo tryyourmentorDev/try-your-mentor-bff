@@ -8,50 +8,79 @@ const router = Router();
 
 /**
  * POST /mentors/signup
- * Creates a new mentor profile by inserting a record in the users table
- * and then inserting a corresponding record in the mentors table.
- * Expects JSON body with:
- *   email, full_name, bio, rating, status, mentor_type, level_of_service, charge
- * Note: password_hash is not provided from the client. We store a dummy value.
+ * Creates both a user and a mentor in one transaction.
+ * Expects JSON body with any of:
+ *  - first_name        (string, required)
+ *  - last_name         (string, required)
+ *  - email             (string, required)
+ *  - job_role_id       (int, optional)
+ *  - highest_qualification (int, optional)
+ *  - experience_years  (int, optional)
+ *  - bio               (string, optional)
+ *  - mentor_type       (string, optional)
+ *  - level_of_service  (string, optional)
+ *  - charge            (numeric, optional)
+ *  - rating            (numeric, optional)
+ *  - status            (string, optional)
  */
 router.post('/signup', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
     const {
+      first_name,
+      last_name,
       email,
-      full_name,
-      bio,
-      rating,
-      status,
-      mentor_type,
-      level_of_service,
-      charge,
+      job_role_id = null,
+      highest_qualification = null,
+      experience_years = null,
+      bio = null,
+      mentor_type = null,
+      level_of_service = null,
+      charge = null,
+      rating = null,
+      status = 'approval_pending'
     } = req.body;
 
-    // Use a dummy password hash since it's not provided
     const dummyPassword = 'dummy';
 
-    // Insert into the users table with role 'mentor'
-    const insertUserQuery = `
-      INSERT INTO users (email, password_hash, full_name, role, created_at)
-      VALUES ($1, $2, $3, 'mentor', NOW())
+    // 1) Create user
+    const insertUser = `
+      INSERT INTO users
+        (email, password_hash, first_name, last_name, role, created_at)
+      VALUES ($1, $2, $3, $4, 'mentor', NOW())
       RETURNING id
     `;
-    const userResult = await client.query(insertUserQuery, [
+    const { rows: [u] } = await client.query(insertUser, [
       email,
       dummyPassword,
-      full_name,
+      first_name,
+      last_name
     ]);
-    const userId = userResult.rows[0].id;
+    const userId = u.id;
 
-    // Insert into the mentors table using the new user's id
-    const insertMentorQuery = `
-      INSERT INTO mentors (user_id, bio, rating, status, mentor_type, level_of_service, charge, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+    // 2) Create mentor profile
+    const insertMentor = `
+      INSERT INTO mentors
+        (
+          user_id,
+          bio,
+          rating,
+          status,
+          mentor_type,
+          level_of_service,
+          charge,
+          experience_years,
+          job_role_id,
+          highest_qualification,
+          created_at
+        )
+      VALUES
+        ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
       RETURNING user_id
     `;
-    await client.query(insertMentorQuery, [
+    await client.query(insertMentor, [
       userId,
       bio,
       rating,
@@ -59,18 +88,22 @@ router.post('/signup', async (req, res) => {
       mentor_type,
       level_of_service,
       charge,
+      experience_years,
+      job_role_id,
+      highest_qualification
     ]);
 
     await client.query('COMMIT');
     return res.status(201).json({ mentorUserId: userId });
-  } catch (error) {
+  } catch (err) {
     await client.query('ROLLBACK');
-    console.error('Error creating mentor:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    console.error('Error in /mentors/signup:', err);
+    return res.status(500).json({ error: 'Internal server error', err });
   } finally {
     client.release();
   }
 });
+
 
 /**
  * POST /mentors
@@ -160,32 +193,158 @@ router.get('/', async (req, res) => {
 });
 
 /**
+ * GET /mentors/all
+ * Returns every mentor along with:
+ *  - user info (first_name, last_name, email)
+ *  - mentor profile (bio, rating, status, etc.)
+ *  - aggregated qualifications & expertises
+ *  - experience_years
+ *  - job role (name)
+ *  - highest qualification (name)
+ */
+router.get('/all', async (req, res) => {
+  try {
+    const query = `
+      SELECT
+        m.user_id,
+        u.email,
+        u.first_name,
+        u.last_name,
+        m.bio,
+        m.rating,
+        m.status,
+        m.mentor_type,
+        m.level_of_service,
+        m.charge,
+        m.experience_years,
+        jr.id AS job_role_id,
+        jr.name AS job_role,
+        hq.id AS highest_qualification_id,
+        hq.name AS highest_qualification,
+        m.created_at
+      FROM mentors m
+      JOIN users u
+        ON u.id = m.user_id
+      LEFT JOIN job_roles jr
+        ON jr.id = m.job_role_id
+      LEFT JOIN qualifications hq
+        ON hq.id = m.highest_qualification
+      LEFT JOIN mentor_qualifications mq
+        ON mq.mentor_id = m.user_id
+      LEFT JOIN qualifications q
+        ON q.id = mq.qualification_id
+      LEFT JOIN mentor_expertises me
+        ON me.mentor_id = m.user_id
+      LEFT JOIN expertises e
+        ON e.id = me.expertise_id
+      GROUP BY
+        m.user_id,
+        u.email,
+        u.first_name,
+        u.last_name,
+        m.bio,
+        m.rating,
+        m.status,
+        m.mentor_type,
+        m.level_of_service,
+        m.charge,
+        m.experience_years,
+        jr.id,
+        hq.id,
+        jr.name,
+        hq.name,
+        m.created_at
+      ORDER BY m.user_id;
+    `;
+
+    const { rows } = await pool.query(query);
+    return res.json(rows);
+  } catch (error) {
+    console.error('Error fetching detailed mentor list:', error);
+    return res.status(500).json({ error: 'Internal server error', error });
+  }
+});
+
+/**
  * GET /mentors/:user_id
- * Retrieves a single mentor's record, possibly includes joined data (like qualifications).
+ * Retrieves a single mentor's full profile, including:
+ *  - user email, first_name, last_name
+ *  - mentor fields (bio, rating, status, etc.)
+ *  - experience_years
+ *  - job_role (name)
+ *  - highest_qualification (name)
+ *  - qualifications[] (array of names)
+ *  - expertises[] (array of names)
  */
 router.get('/:user_id', async (req, res) => {
   try {
     const userId = parseInt(req.params.user_id, 10);
 
     const query = `
-      SELECT user_id, bio, rating, status, mentor_type, level_of_service, charge, created_at
-      FROM mentors
-      WHERE user_id = $1
+      SELECT
+        m.user_id,
+        u.email,
+        u.first_name,
+        u.last_name,
+        m.bio,
+        m.rating,
+        m.status,
+        m.mentor_type,
+        m.level_of_service,
+        m.charge,
+        m.experience_years,
+        jr.id   AS job_role_id,
+        jr.name   AS job_role,
+        hq.id   AS highest_qualification_id,
+        hq.name   AS highest_qualification,
+        m.created_at
+      FROM mentors m
+      JOIN users u
+        ON u.id = m.user_id
+      LEFT JOIN job_roles jr
+        ON jr.id = m.job_role_id
+      LEFT JOIN qualifications hq
+        ON hq.id = m.highest_qualification
+      LEFT JOIN mentor_qualifications mq
+        ON mq.mentor_id = m.user_id
+      LEFT JOIN qualifications q
+        ON q.id = mq.qualification_id
+      LEFT JOIN mentor_expertises me
+        ON me.mentor_id = m.user_id
+      LEFT JOIN expertises e
+        ON e.id = me.expertise_id
+      WHERE m.user_id = $1
+      GROUP BY
+        m.user_id,
+        u.email,
+        u.first_name,
+        u.last_name,
+        m.bio,
+        m.rating,
+        m.status,
+        m.mentor_type,
+        m.level_of_service,
+        m.charge,
+        m.experience_years,
+        jr.id,
+        hq.id,
+        jr.name,
+        hq.name,
+        m.created_at;
     `;
-    const result = await pool.query(query, [userId]);
 
-    if (result.rows.length === 0) {
+    const { rows } = await pool.query(query, [userId]);
+    if (rows.length === 0) {
       return res.status(404).json({ error: 'Mentor not found' });
     }
 
-    // If you also want to fetch qualifications or expertises, you can do additional queries or a join.
-
-    return res.json(result.rows[0]);
+    return res.json(rows[0]);
   } catch (error) {
     console.error('Error fetching mentor:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ error: 'Internal server error', error });
   }
 });
+
 
 /**
  * PUT /mentors/:user_id
@@ -284,5 +443,8 @@ router.patch('/:user_id/approve', async (req, res) => {
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+
+
 
 export default router;
