@@ -14,6 +14,7 @@ import sessionMentorsRouter from './routes/sessionMentors.js';
 import paymentsRouter from './routes/payments.js';
 import resumesRouter from './routes/resumes.js';
 import industriesRouter from './routes/industries.js';
+import matchingRouter from './routes/matching.js';
 
 dotenv.config();
 
@@ -52,5 +53,6 @@ app.use('/sessions', sessionMentorsRouter);
 app.use('/payments', paymentsRouter);
 app.use('/resumes', resumesRouter);
 app.use('/industries', industriesRouter);
+app.use('/matching', matchingRouter);
 
 export default app;
