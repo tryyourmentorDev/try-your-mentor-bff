@@ -46,7 +46,7 @@ const toFrontendMentor = (record) => {
     languages: Array.isArray(record.languages) ? record.languages : [],
     bio: record.bio ?? '',
     achievements: Array.isArray(record.achievements) ? record.achievements : [],
-    image: record.image_url ?? '',
+    image: record.image ?? '',
     industry: record.industry ?? '',
     unavailableDateTime:
       typeof record.unavailable_date_time === 'object' && record.unavailable_date_time !== null
