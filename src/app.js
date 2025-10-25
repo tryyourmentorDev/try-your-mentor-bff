@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import pkg from 'pg';
 import dotenv from 'dotenv';
 import usersRouter from './routes/users.js';
@@ -24,6 +25,32 @@ export const pool = new Pool({
 });
 
 const app = express();
+
+const allowedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim())
+  : [];
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    console.warn(`CORS blocked for origin: ${origin}`);
+    return callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  optionsSuccessStatus: 200,
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json());
 
 app.get('/db-test', async (req, res) => {
