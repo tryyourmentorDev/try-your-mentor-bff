@@ -8,6 +8,9 @@ RETURNS TABLE (
   mentor_id INT,
   first_name VARCHAR,
   last_name VARCHAR,
+  bio TEXT,
+  image VARCHAR,
+  company VARCHAR,
   experience_years INT,
   charge NUMERIC,
   level_of_service VARCHAR,
@@ -17,6 +20,8 @@ RETURNS TABLE (
   job_role_id INT,
   job_role_name VARCHAR,
   mentor_job_rank INT,
+  rating NUMERIC,
+  review_count INT,
   match_score NUMERIC
 ) AS $$
 BEGIN
@@ -42,6 +47,9 @@ BEGIN
       mt.user_id AS mentor_id,
       u.first_name,
       u.last_name,
+      mt.bio,
+      mt.profile_image_url AS image,
+      mt.company,
       mt.experience_years,
       mt.charge,
       mt.level_of_service,
@@ -52,18 +60,31 @@ BEGIN
       jr.name AS job_role_name,
       jr.rank AS mentor_job_rank,
       qi.industry_id AS qual_industry,
-      jri.industry_id AS job_industry
+      jri.industry_id AS job_industry,
+      COALESCE(mra.avg_rating, 0)::numeric(3,2) AS rating,
+      COALESCE(mra.review_count, 0) AS review_count
     FROM mentors mt
     JOIN users u ON u.id = mt.user_id
     LEFT JOIN qualifications q ON q.id = mt.highest_qualification_id
     LEFT JOIN qualification_industries qi ON qi.qualification_id = q.id
     LEFT JOIN job_roles jr ON jr.id = mt.job_role_id
     LEFT JOIN jobrole_industries jri ON jri.jobrole_id = jr.id
+    LEFT JOIN (
+      SELECT
+        mentor_reviews.mentor_id,
+        AVG(mentor_reviews.rating)::numeric(3,2) AS avg_rating,
+        COUNT(*) AS review_count
+      FROM mentor_reviews
+      GROUP BY mentor_reviews.mentor_id
+    ) mra ON mra.mentor_id = mt.user_id
   )
   SELECT
     m.mentor_id,
     m.first_name,
     m.last_name,
+    m.bio,
+    m.image,
+    m.company,
     m.experience_years,
     m.charge,
     m.level_of_service,
@@ -73,6 +94,8 @@ BEGIN
     m.job_role_id,
     m.job_role_name,
     m.mentor_job_rank,
+    m.rating,
+    m.review_count,
     (
       (m.experience_years - md.experience_years) * 1.0 +
       (m.mentor_qual_rank - md.mentee_qual_rank) * 1.5 +
