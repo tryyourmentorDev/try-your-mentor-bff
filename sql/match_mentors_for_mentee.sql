@@ -61,18 +61,18 @@ BEGIN
       jr.rank AS mentor_job_rank,
       qi.industry_id AS qual_industry,
       jri.industry_id AS job_industry,
-      COALESCE(mra.avg_rating, 0)::numeric(3,2) AS rating,
+      COALESCE(mra.rating, 0)::numeric(3,2) AS rating,
       COALESCE(mra.review_count, 0) AS review_count
     FROM mentors mt
     JOIN users u ON u.id = mt.user_id
-    LEFT JOIN qualifications q ON q.id = mt.highest_qualification_id
+    LEFT JOIN qualifications q ON q.id = mt.highest_qualification
     LEFT JOIN qualification_industries qi ON qi.qualification_id = q.id
     LEFT JOIN job_roles jr ON jr.id = mt.job_role_id
     LEFT JOIN jobrole_industries jri ON jri.jobrole_id = jr.id
     LEFT JOIN (
       SELECT
         mentor_reviews.mentor_id,
-        AVG(mentor_reviews.rating)::numeric(3,2) AS avg_rating,
+        AVG(mentor_reviews.rating)::numeric(3,2) AS rating,
         COUNT(*) AS review_count
       FROM mentor_reviews
       GROUP BY mentor_reviews.mentor_id
@@ -104,12 +104,12 @@ BEGIN
   FROM mentor_matches m
   JOIN mentee_data md ON TRUE
   WHERE
-    md.experience_years IS NOT NULL
-    AND m.experience_years >= md.experience_years + 2
-    AND m.mentor_qual_rank > md.mentee_qual_rank
-    AND m.mentor_job_rank > md.mentee_job_rank
-    AND m.qual_industry = md.mentee_industry_id
-    AND m.job_industry = md.mentee_industry_id
+--    md.experience_years IS NOT NULL
+--    AND m.experience_years >= md.experience_years + 2
+--    AND m.mentor_qual_rank > md.mentee_qual_rank
+--    AND m.mentor_job_rank > md.mentee_job_rank
+--    AND m.qual_industry = md.mentee_industry_id
+     m.job_industry = md.mentee_industry_id
   ORDER BY match_score DESC;
 END;
 $$ LANGUAGE plpgsql;
