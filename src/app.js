@@ -16,6 +16,9 @@ import paymentsRouter from './routes/payments.js';
 import resumesRouter from './routes/resumes.js';
 import industriesRouter from './routes/industries.js';
 import matchingRouter from './routes/matching.js';
+import mentorReviewsRouter from './routes/mentorReviews.js';
+import mentorAvailabilityRouter from './routes/mentorAvailability.js';
+import bookingsRouter from './routes/bookings.js';
 
 dotenv.config();
 
@@ -81,5 +84,8 @@ app.use('/payments', paymentsRouter);
 app.use('/resumes', resumesRouter);
 app.use('/industries', industriesRouter);
 app.use('/matching', matchingRouter);
+app.use('/mentor-reviews', mentorReviewsRouter);
+app.use('/mentors', mentorAvailabilityRouter);
+app.use('/mentors', bookingsRouter);
 
 export default app;

@@ -11,6 +11,7 @@ RETURNS TABLE (
   bio TEXT,
   image VARCHAR,
   company VARCHAR,
+  expertise TEXT[],
   experience_years INT,
   charge NUMERIC,
   level_of_service VARCHAR,
@@ -50,6 +51,7 @@ BEGIN
       mt.bio,
       mt.profile_image_url AS image,
       mt.company,
+      COALESCE(me_data.expertise, ARRAY[]::text[]) AS expertise,
       mt.experience_years,
       mt.charge,
       mt.level_of_service,
@@ -69,6 +71,12 @@ BEGIN
     LEFT JOIN qualification_industries qi ON qi.qualification_id = q.id
     LEFT JOIN job_roles jr ON jr.id = mt.job_role_id
     LEFT JOIN jobrole_industries jri ON jri.jobrole_id = jr.id
+    LEFT JOIN LATERAL (
+      SELECT ARRAY_AGG(e.name ORDER BY e.name) AS expertise
+      FROM mentor_expertises me
+      JOIN expertises e ON e.id = me.expertise_id
+      WHERE me.mentor_id = mt.user_id
+    ) me_data ON TRUE
     LEFT JOIN (
       SELECT
         mentor_reviews.mentor_id,
@@ -85,6 +93,7 @@ BEGIN
     m.bio,
     m.image,
     m.company,
+    m.expertise,
     m.experience_years,
     m.charge,
     m.level_of_service,
