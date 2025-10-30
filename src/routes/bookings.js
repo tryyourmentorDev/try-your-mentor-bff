@@ -1,11 +1,56 @@
 import { Router } from 'express';
 import { DateTime } from 'luxon';
+import { put } from '@vercel/blob';
 import { pool } from '../lib/db.js';
 
 const router = Router();
 
 const normalizeTime = (date, time, timezone) => {
   return DateTime.fromISO(`${date}T${time}`, { zone: timezone }).toUTC();
+};
+
+const toLocalSlot = (startDateTime, durationMinutes, timezone) => {
+  const startLocal = startDateTime.setZone(timezone ?? 'UTC');
+  const endLocal = startLocal.plus({ minutes: durationMinutes });
+
+  return {
+    date: startLocal.toISODate(),
+    start: startLocal.toFormat('HH:mm'),
+    end: endLocal.toFormat('HH:mm'),
+  };
+};
+
+const extractBase64Payload = (base64String) => {
+  if (!base64String) return null;
+  const commaIndex = base64String.indexOf(',');
+  return commaIndex !== -1 ? base64String.slice(commaIndex + 1) : base64String;
+};
+
+const uploadResume = async (mentorId, userId, cvPayload) => {
+  if (!cvPayload?.base64) {
+    return null;
+  }
+
+  if (!process.env.VERCEL_BLOB_RW_TOKEN) {
+    throw new Error('Resume upload unavailable. Please try again later.');
+  }
+
+  const base64Data = extractBase64Payload(cvPayload.base64);
+  const buffer = Buffer.from(base64Data, 'base64');
+
+  const sanitizedFileName = cvPayload.fileName
+    ? cvPayload.fileName.replace(/\s+/g, '-')
+    : `resume-${userId}.pdf`;
+
+  const key = `resumes/${mentorId}/${Date.now()}-${sanitizedFileName}`;
+
+  const blob = await put(key, buffer, {
+    access: 'public',
+    contentType: cvPayload.mimeType ?? 'application/octet-stream',
+    token: process.env.VERCEL_BLOB_RW_TOKEN,
+  });
+
+  return blob.url;
 };
 
 const createMenteeProfile = async (client, userId, menteePayload) => {
@@ -76,6 +121,20 @@ router.post('/:mentorId/bookings', async (req, res) => {
 
     await createMenteeProfile(client, userId, mentee);
 
+    let resumeUrl = null;
+    if (booking.cv) {
+      resumeUrl = await uploadResume(mentorIdParam, userId, booking.cv);
+      if (resumeUrl) {
+        await client.query(
+          `
+            INSERT INTO resumes (user_id, file_url, file_name)
+            VALUES ($1, $2, $3);
+          `,
+          [userId, resumeUrl, booking.cv.fileName ?? null]
+        );
+      }
+    }
+
     const startDateTime = normalizeTime(
       booking.date,
       booking.time,
@@ -92,7 +151,7 @@ router.post('/:mentorId/bookings', async (req, res) => {
         SELECT mentor_booking_id
         FROM mentor_bookings
         WHERE mentor_id = $1
-          AND status = 'reserved'
+          AND status IN ('reserved', 'completed')
           AND tstzrange(start_time, end_time, '[)') && tstzrange($2, $3, '[)');
       `,
       [mentorIdParam, startDateTime.toSQL(), endDateTime.toSQL()]
@@ -129,6 +188,33 @@ router.post('/:mentorId/bookings', async (req, res) => {
       ]
     );
 
+    const { date: bookingDate, start: bookingStart, end: bookingEnd } = toLocalSlot(
+      startDateTime,
+      60,
+      booking.timezone ?? 'UTC'
+    );
+
+    await client.query(
+      `
+        INSERT INTO mentor_time_exceptions (
+          mentor_id,
+          exception_type,
+          exception_date,
+          start_time,
+          end_time,
+          note
+        )
+        VALUES ($1, 'unavailable', $2, $3::time, $4::time, $5)
+      `,
+      [
+        mentorIdParam,
+        bookingDate,
+        bookingStart,
+        bookingEnd,
+        `Booking ID ${bookingResult.rows[0].mentor_booking_id}`,
+      ]
+    );
+
     await client.query('COMMIT');
 
     const savedBooking = bookingResult.rows[0];
@@ -144,6 +230,11 @@ router.post('/:mentorId/bookings', async (req, res) => {
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Failed to create booking:', error);
+    if (error.code === '23P01' || error.code === '23505') {
+      return res.status(409).json({
+        message: 'This time slot is no longer available. Please choose another time.',
+      });
+    }
     return res.status(500).json({
       message: error.message ?? 'Failed to create booking. Please try again.',
     });

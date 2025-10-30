@@ -11,7 +11,7 @@ RETURNS TABLE (
   bio TEXT,
   image VARCHAR,
   company VARCHAR,
-  expertise TEXT[],
+  expertise VARCHAR[],
   experience_years INT,
   charge NUMERIC,
   level_of_service VARCHAR,
@@ -22,8 +22,10 @@ RETURNS TABLE (
   job_role_name VARCHAR,
   mentor_job_rank INT,
   rating NUMERIC,
-  review_count INT,
-  match_score NUMERIC
+  review_count BIGINT,
+  match_score numeric,
+  location VARCHAR,
+  languages VARCHAR
 ) AS $$
 BEGIN
   RETURN QUERY
@@ -64,19 +66,21 @@ BEGIN
       qi.industry_id AS qual_industry,
       jri.industry_id AS job_industry,
       COALESCE(mra.rating, 0)::numeric(3,2) AS rating,
-      COALESCE(mra.review_count, 0) AS review_count
+      COALESCE(mra.review_count, 0) AS review_count,
+      mt.location,
+      mt.languages
     FROM mentors mt
     JOIN users u ON u.id = mt.user_id
     LEFT JOIN qualifications q ON q.id = mt.highest_qualification
     LEFT JOIN qualification_industries qi ON qi.qualification_id = q.id
     LEFT JOIN job_roles jr ON jr.id = mt.job_role_id
     LEFT JOIN jobrole_industries jri ON jri.jobrole_id = jr.id
-    LEFT JOIN LATERAL (
-      SELECT ARRAY_AGG(e.name ORDER BY e.name) AS expertise
-      FROM mentor_expertises me
-      JOIN expertises e ON e.id = me.expertise_id
-      WHERE me.mentor_id = mt.user_id
-    ) me_data ON TRUE
+	LEFT JOIN LATERAL (
+	      SELECT ARRAY_AGG(e.name ORDER BY e.name) AS expertise
+	      FROM mentor_expertises me
+	      JOIN expertises e ON e.id = me.expertise_id
+	      WHERE me.mentor_id = mt.user_id
+	    ) me_data ON TRUE
     LEFT JOIN (
       SELECT
         mentor_reviews.mentor_id,
@@ -105,11 +109,14 @@ BEGIN
     m.mentor_job_rank,
     m.rating,
     m.review_count,
+    
     (
       (m.experience_years - md.experience_years) * 1.0 +
       (m.mentor_qual_rank - md.mentee_qual_rank) * 1.5 +
       (m.mentor_job_rank - md.mentee_job_rank) * 1.2
-    )::numeric AS match_score
+    )::numeric AS match_score,
+    m.location,
+    m.languages
   FROM mentor_matches m
   JOIN mentee_data md ON TRUE
   WHERE

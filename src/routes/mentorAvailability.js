@@ -1,20 +1,50 @@
 import { Router } from 'express';
+import { DateTime } from 'luxon';
 import { pool } from '../lib/db.js';
 
 const router = Router();
+const SLOT_MINUTES = 60;
 
-const formatTime = (time) => {
-  if (!time) return null;
+const formatTime = (value) => {
+  if (!value) return null;
 
-  if (time instanceof Date) {
-    return time.toISOString().split('T')[1].slice(0, 5);
+  if (value instanceof Date) {
+    return value.toISOString().split('T')[1].slice(0, 5);
   }
 
-  if (typeof time === 'string') {
-    return time.slice(0, 5);
+  if (typeof value === 'string') {
+    return value.slice(0, 5);
   }
 
   return null;
+};
+
+const addTimeSlot = (map, dateKey, slot) => {
+  if (!slot) return;
+  if (map[dateKey] === 'full-day') return;
+  if (!Array.isArray(map[dateKey])) {
+    map[dateKey] = [];
+  }
+  if (!map[dateKey].includes(slot)) {
+    map[dateKey].push(slot);
+    map[dateKey].sort();
+  }
+};
+
+const addRangeSlots = (map, dateKey, start, end, incrementMinutes = SLOT_MINUTES) => {
+  if (!start) return;
+
+  const startDt = DateTime.fromISO(`${dateKey}T${start}`);
+  let endDt = end ? DateTime.fromISO(`${dateKey}T${end}`) : startDt.plus({ minutes: incrementMinutes });
+
+  if (!startDt.isValid) return;
+  if (!endDt.isValid) {
+    endDt = startDt.plus({ minutes: incrementMinutes });
+  }
+
+  for (let cursor = startDt; cursor < endDt; cursor = cursor.plus({ minutes: incrementMinutes })) {
+    addTimeSlot(map, dateKey, cursor.toFormat('HH:mm'));
+  }
 };
 
 router.get('/:mentorId/availability', async (req, res) => {
@@ -67,18 +97,8 @@ router.get('/:mentorId/availability', async (req, res) => {
       [mentorId]
     );
 
+    const scheduleTimezone = workingHours.timezone ?? 'UTC';
     const unavailableDateTime = {};
-
-    const addTimeSlot = (dateKey, slot) => {
-      if (!slot) return;
-      if (unavailableDateTime[dateKey] === 'full-day') return;
-      if (!Array.isArray(unavailableDateTime[dateKey])) {
-        unavailableDateTime[dateKey] = [];
-      }
-      if (!unavailableDateTime[dateKey].includes(slot)) {
-        unavailableDateTime[dateKey].push(slot);
-      }
-    };
 
     for (const exception of exceptionRows) {
       const dateKey = exception.exception_date.toISOString().split('T')[0];
@@ -89,21 +109,12 @@ router.get('/:mentorId/availability', async (req, res) => {
         continue;
       }
 
-      const timeSlots =
-        Array.isArray(unavailableDateTime[dateKey]) && unavailableDateTime[dateKey] !== 'full-day'
-          ? unavailableDateTime[dateKey]
-          : [];
-
-      if (startTime) {
-        addTimeSlot(dateKey, formatTime(startTime));
-      }
-      if (endTime) {
-        addTimeSlot(dateKey, formatTime(endTime));
-      }
-
-      if (Array.isArray(unavailableDateTime[dateKey])) {
-        unavailableDateTime[dateKey].sort();
-      }
+      addRangeSlots(
+        unavailableDateTime,
+        dateKey,
+        formatTime(startTime),
+        formatTime(endTime)
+      );
     }
 
     const { rows: bookingRows } = await pool.query(
@@ -119,13 +130,16 @@ router.get('/:mentorId/availability', async (req, res) => {
     );
 
     for (const booking of bookingRows) {
-      const dateKey = booking.start_time.toISOString().split('T')[0];
-      addTimeSlot(dateKey, formatTime(booking.start_time));
-      addTimeSlot(dateKey, formatTime(booking.end_time));
+      const startLocal = DateTime.fromJSDate(booking.start_time).setZone(scheduleTimezone);
+      const endLocal = DateTime.fromJSDate(booking.end_time).setZone(scheduleTimezone);
+      const dateKey = startLocal.toISODate();
 
-      if (Array.isArray(unavailableDateTime[dateKey])) {
-        unavailableDateTime[dateKey].sort();
-      }
+      addRangeSlots(
+        unavailableDateTime,
+        dateKey,
+        startLocal.toFormat('HH:mm'),
+        endLocal.toFormat('HH:mm')
+      );
     }
 
     return res.json({
